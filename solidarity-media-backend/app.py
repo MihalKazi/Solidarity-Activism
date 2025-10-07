@@ -72,7 +72,7 @@ def get_enhanced_ydl_opts():
         },
         
         # Network settings - optimized for free tier servers
-        'socket_timeout': 60,
+        'socket_timeout': 600,
         'retries': 10,
         'fragment_retries': 10,
         'skip_unavailable_fragments': True,
