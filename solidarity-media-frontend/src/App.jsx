@@ -454,6 +454,14 @@ export default function SolidarityMediaHub() {
             <li>Support grassroots movements worldwide</li>
           </ul>
         </div>
+
+        <div className="bg-gradient-to-r from-purple-100 to-indigo-100 rounded-2xl p-4 mt-4 text-center border-2 border-purple-300">
+          <p className="text-sm text-gray-700">
+            <span className="font-bold text-purple-800">Developed by Mehal</span>
+            <span className="mx-2">•</span>
+            <span className="font-semibold text-indigo-700">Inspired by Muri</span>
+          </p>
+        </div>
       </div>
     </div>
   );
