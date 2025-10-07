@@ -13,6 +13,18 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# ==========================================
+# FIX 1: KEYRING ERROR - Critical for Render
+# ==========================================
+try:
+    import keyring.backends.null
+    keyring.set_keyring(keyring.backends.null.Keyring())
+    print("✅ Keyring configured: null backend (server mode)")
+except ImportError:
+    print("⚠️  Keyring module not found - continuing without it")
+except Exception as e:
+    print(f"⚠️  Keyring configuration failed: {e}")
+
 app = Flask(__name__)
 
 # BULLETPROOF CORS Configuration
@@ -33,9 +45,12 @@ def after_request(response):
 TEMP_DIR = tempfile.gettempdir()
 
 def get_enhanced_ydl_opts():
-    """Get enhanced yt-dlp options to bypass bot detection with latest features"""
+    """
+    Get optimized yt-dlp options for SERVER deployment
+    CRITICAL: No browser cookie extraction (causes keyring errors)
+    """
     return {
-        # CRITICAL: Most realistic browser simulation
+        # Realistic browser simulation
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         
         # Complete browser headers
@@ -56,23 +71,27 @@ def get_enhanced_ydl_opts():
             'Cache-Control': 'max-age=0',
         },
         
-        # Network settings - increased timeouts for Render free tier
+        # Network settings - optimized for free tier servers
         'socket_timeout': 60,
         'retries': 10,
         'fragment_retries': 10,
         'skip_unavailable_fragments': True,
         
         # Certificate handling
-        'no_check_certificates': True,
+        'nocheckcertificate': True,
         
-        # Cookie handling - try multiple browsers
-        'cookiesfrombrowser': ('chrome', 'chromium', 'edge', 'firefox'),
+        # ==========================================
+        # FIX 2: DISABLE COOKIE EXTRACTION - Critical!
+        # ==========================================
+        # This line was causing the keyring error
+        # Servers don't have browsers installed
+        'cookiesfrombrowser': None,  # MUST BE None for server deployment
         
         # Geo-bypass attempts
         'geo_bypass': True,
         'geo_bypass_country': 'US',
         
-        # IMPORTANT: Disable problematic features that trigger bot detection
+        # Disable problematic features
         'youtube_include_dash_manifest': False,
         'youtube_include_hls_manifest': False,
         
@@ -85,10 +104,10 @@ def get_enhanced_ydl_opts():
             }
         },
         
-        # Use IPv4 to avoid some blocking
-        'prefer_ipv4': True,
+        # Network preferences
+        'source_address': '0.0.0.0',  # Bind to all interfaces
         
-        # Allow for slower extraction
+        # Chunk size for downloads
         'http_chunk_size': 10485760,  # 10MB chunks
         
         # Logging
@@ -99,12 +118,12 @@ def get_enhanced_ydl_opts():
         # Don't extract flat
         'extract_flat': False,
         
-        # Add referer to appear more legitimate
+        # Add referer
         'referer': 'https://www.google.com/',
     }
 
 def get_video_info(url):
-    """Extract metadata without downloading"""
+    """Extract metadata without downloading - with enhanced error handling"""
     ydl_opts = get_enhanced_ydl_opts()
     ydl_opts.update({
         'quiet': True,
@@ -121,21 +140,28 @@ def get_video_info(url):
         
         # Provide user-friendly error messages
         if 'sign in' in error_msg.lower() or 'bot' in error_msg.lower():
-            raise Exception('⚠️ This platform is blocking automated access. Try:\n1. A different video from the same platform\n2. A video from TikTok or Twitter/X (better success rate)\n3. Wait 5-10 minutes and retry')
+            raise Exception('⚠️ Platform blocking detected. Try:\n1. A different video\n2. TikTok or Twitter/X (better success)\n3. Wait 5-10 minutes and retry')
         elif 'private' in error_msg.lower() or 'registered users' in error_msg.lower():
-            raise Exception('🔒 This video is private or requires login. Please use a public video that doesn\'t require authentication.')
+            raise Exception('🔒 Private video. Use a public video instead.')
         elif 'age' in error_msg.lower() or 'restricted' in error_msg.lower():
-            raise Exception('🔞 This video is age-restricted and cannot be accessed without authentication.')
+            raise Exception('🔞 Age-restricted content requires authentication.')
         elif 'not available' in error_msg.lower() or 'removed' in error_msg.lower():
-            raise Exception('❌ This video is not available (may be geo-blocked, removed, or deleted).')
+            raise Exception('❌ Video unavailable (geo-blocked/removed/deleted).')
         elif 'copyright' in error_msg.lower():
-            raise Exception('©️ This video has copyright restrictions and cannot be downloaded.')
+            raise Exception('©️ Copyright restrictions prevent download.')
         elif 'live' in error_msg.lower():
-            raise Exception('📡 Live streams cannot be downloaded. Wait until the stream ends.')
+            raise Exception('📡 Live streams cannot be downloaded.')
+        elif 'unsupported url' in error_msg.lower():
+            raise Exception('🔗 URL not supported. Check the platform list.')
         else:
-            raise Exception(f'Unable to access video: {error_msg[:250]}')
+            # Clean up error message
+            clean_error = error_msg.replace('[0;31mERROR:[0m', '').strip()
+            raise Exception(f'Unable to access: {clean_error[:200]}')
     except Exception as e:
-        raise Exception(f'Error: {str(e)[:250]}')
+        error_str = str(e)
+        # Remove ANSI color codes
+        clean_error = re.sub(r'\x1b\[[0-9;]*m', '', error_str)
+        raise Exception(f'Error: {clean_error[:200]}')
 
 @app.route('/api/metadata', methods=['POST', 'OPTIONS'])
 def get_metadata():
@@ -186,8 +212,10 @@ def get_metadata():
     
     except Exception as e:
         error_msg = str(e)
-        print(f"❌ Metadata error: {error_msg}")
-        return jsonify({'error': error_msg}), 500
+        # Remove ANSI color codes from error
+        clean_error = re.sub(r'\x1b\[[0-9;]*m', '', error_msg)
+        print(f"❌ Metadata error: {clean_error}")
+        return jsonify({'error': clean_error}), 500
 
 @app.route('/api/download', methods=['POST', 'OPTIONS'])
 def download_media():
@@ -265,21 +293,23 @@ def download_media():
                 info = ydl.extract_info(url, download=False)
             except yt_dlp.utils.DownloadError as e:
                 error_msg = str(e)
-                print(f"❌ Extraction failed: {error_msg}")
+                # Remove ANSI codes
+                clean_error = re.sub(r'\x1b\[[0-9;]*m', '', error_msg)
+                print(f"❌ Extraction failed: {clean_error}")
                 
                 # User-friendly errors
                 if 'sign in' in error_msg.lower() or 'bot' in error_msg.lower():
-                    return jsonify({'error': '⚠️ Platform detected automation. Try:\n1. Different video\n2. TikTok/Twitter (better success)\n3. Wait 5-10 mins and retry'}), 400
+                    return jsonify({'error': '⚠️ Platform blocking detected. Try a different video or wait 5-10 minutes.'}), 400
                 elif 'private' in error_msg.lower() or 'registered users' in error_msg.lower():
                     return jsonify({'error': '🔒 Private video. Use a public video instead.'}), 400
                 elif 'age' in error_msg.lower() or 'restricted' in error_msg.lower():
-                    return jsonify({'error': '🔞 Age-restricted video cannot be downloaded.'}), 400
+                    return jsonify({'error': '🔞 Age-restricted content cannot be downloaded.'}), 400
                 elif 'not available' in error_msg.lower():
                     return jsonify({'error': '❌ Video not available (geo-blocked/removed).'}), 400
                 elif 'copyright' in error_msg.lower():
-                    return jsonify({'error': '©️ Video has copyright restrictions.'}), 400
+                    return jsonify({'error': '©️ Copyright restrictions prevent download.'}), 400
                 else:
-                    return jsonify({'error': f'Cannot access: {error_msg[:200]}'}), 400
+                    return jsonify({'error': f'Cannot access: {clean_error[:200]}'}), 400
             
             # Check for common issues
             formats = info.get('formats', [])
@@ -318,7 +348,7 @@ def download_media():
         
         if not os.path.exists(downloaded_file):
             print(f"❌ CRITICAL: File does not exist after download")
-            return jsonify({'error': 'Download failed - file not created. The platform may be blocking downloads.'}), 500
+            return jsonify({'error': 'Download failed - file not created. Platform may be blocking downloads.'}), 500
         
         # Verify file integrity
         file_size = os.path.getsize(downloaded_file)
@@ -327,7 +357,7 @@ def download_media():
         if file_size < 1024:  # Less than 1KB
             print(f"❌ File too small: {file_size} bytes")
             os.remove(downloaded_file)
-            return jsonify({'error': 'Download failed - file too small (likely an error page)'}), 500
+            return jsonify({'error': 'Download failed - file too small (likely error page).'}), 500
         
         # Check for HTML errors (common when downloads fail)
         with open(downloaded_file, 'rb') as f:
@@ -335,7 +365,7 @@ def download_media():
             if b'<!DOCTYPE' in first_bytes or b'<html' in first_bytes:
                 print("❌ File is HTML, not a video!")
                 os.remove(downloaded_file)
-                return jsonify({'error': 'Download failed - received error page instead of video. Video may be geo-blocked or restricted.'}), 500
+                return jsonify({'error': 'Download failed - received error page. Video may be geo-blocked.'}), 500
         
         # Get MIME type
         mime_type = mimetypes.guess_type(downloaded_file)[0] or 'video/mp4'
@@ -376,10 +406,13 @@ def download_media():
     
     except Exception as e:
         error_msg = str(e)
+        # Remove ANSI color codes
+        clean_error = re.sub(r'\x1b\[[0-9;]*m', '', error_msg)
+        
         print(f"\n{'='*60}")
         print(f"❌ DOWNLOAD FAILED")
         print(f"{'='*60}")
-        print(f"Error: {error_msg}")
+        print(f"Error: {clean_error}")
         print(f"{'='*60}\n")
         
         # Cleanup on error
@@ -390,7 +423,7 @@ def download_media():
             except:
                 pass
         
-        return jsonify({'error': error_msg[:300]}), 500
+        return jsonify({'error': clean_error[:300]}), 500
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -398,8 +431,10 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'service': 'Solidarity Media Hub API',
-        'version': '2.2.0',
-        'yt_dlp_version': yt_dlp.version.__version__
+        'version': '2.3.0',
+        'yt_dlp_version': yt_dlp.version.__version__,
+        'keyring_status': 'disabled (server mode)',
+        'cookie_extraction': 'disabled (server mode)'
     })
 
 @app.route('/api/platforms', methods=['GET'])
@@ -412,7 +447,8 @@ def get_platforms():
             'limited': ['Facebook (public only)', 'YouTube (age-restricted)', 'Instagram (private)'],
             'requires_auth': ['Facebook (most)', 'YouTube (some)', 'Private accounts']
         },
-        'note': 'Success rate varies based on platform anti-bot protections. Public content works best.'
+        'note': 'Success rate varies. Public content works best. Age-restricted and private content may fail.',
+        'server_mode': 'Cookie extraction disabled - authentication-required content will fail'
     })
 
 @app.route('/', methods=['GET'])
@@ -420,8 +456,9 @@ def home():
     """API home page"""
     return jsonify({
         'service': 'Solidarity Media Hub API',
-        'version': '2.2.0',
+        'version': '2.3.0',
         'yt_dlp_version': yt_dlp.version.__version__,
+        'server_mode': 'Optimized for deployment (no browser cookies)',
         'endpoints': {
             '/api/metadata': 'POST - Get media metadata',
             '/api/download': 'POST - Download media',
@@ -429,13 +466,18 @@ def home():
             '/api/platforms': 'GET - Supported platforms'
         },
         'best_platforms': [
-            'TikTok - Excellent success rate',
-            'Twitter/X - Excellent success rate',
+            'TikTok - Excellent',
+            'Twitter/X - Excellent',
             'Reddit - Very good',
             'Vimeo - Very good',
-            'YouTube - Good for public videos'
+            'YouTube - Good (public videos)'
         ],
-        'note': 'Some platforms require authentication for certain content. Use public videos for best results.',
+        'limitations': [
+            'Age-restricted content not supported',
+            'Private videos not supported',
+            'Authentication-required content will fail'
+        ],
+        'note': 'Use public videos for best results.',
         'docs': 'See README.md for full documentation'
     })
 
@@ -444,9 +486,11 @@ if __name__ == '__main__':
     print(f"\n{'='*60}")
     print(f"🚀 Solidarity Media Hub API")
     print(f"{'='*60}")
-    print(f"Version: 2.2.0")
+    print(f"Version: 2.3.0 (Server Optimized)")
     print(f"yt-dlp: {yt_dlp.version.__version__}")
     print(f"Port: {port}")
     print(f"Temp Dir: {TEMP_DIR}")
+    print(f"Cookie Extraction: DISABLED (no browsers)")
+    print(f"Keyring: NULL backend (server mode)")
     print(f"{'='*60}\n")
     app.run(host='0.0.0.0', port=port, debug=True)
