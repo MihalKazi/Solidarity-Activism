@@ -456,10 +456,16 @@ export default function SolidarityMediaHub() {
         </div>
 
         <div className="bg-gradient-to-r from-purple-100 to-indigo-100 rounded-2xl p-4 mt-4 text-center border-2 border-purple-300">
-          <p className="text-sm text-gray-700">
-            <span className="font-bold text-purple-800">Developed by Mehal</span>
-            <span className="mx-2">•</span>
-            <span className="font-semibold text-indigo-700">Inspired by Muri</span>
+          <p className="text-sm text-gray-700 flex items-center justify-center gap-2">
+            <span className="font-bold text-purple-800">Developed by</span>
+            <a href="https://github.com/MihalKazi" target="_blank" rel="noopener noreferrer" className="text-purple-700 hover:text-purple-900 font-bold underline cursor-pointer">
+              Vegeta
+            </a>
+            <span className="mx-1">•</span>
+            <span className="font-semibold text-indigo-700">Inspired by</span>
+            <a href="https://tenor.com/view/starry-night-gif-18053140339477122237" target="_blank" rel="noopener noreferrer" className="text-indigo-700 hover:text-indigo-900 font-bold underline cursor-pointer">
+              Muri
+            </a>
           </p>
         </div>
       </div>
